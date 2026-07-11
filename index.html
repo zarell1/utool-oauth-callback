@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <title>UTool Authorization</title>
+  <style>
+    :root { color-scheme: dark; font-family: "Segoe UI", sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0b0b0c; color: #ececec; }
+    main { width: min(420px, calc(100% - 48px)); padding: 30px; border: 1px solid #29292c; border-radius: 18px; background: #151517; }
+    h1 { margin: 0 0 10px; font-size: 20px; }
+    p { margin: 0; color: #a7a7ac; line-height: 1.55; }
+    .error { color: #ffb36b; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="title">Возвращаемся в UTool</h1>
+    <p id="message">Авторизация завершена. Эта вкладка закроется автоматически.</p>
+  </main>
+  <script>
+    (() => {
+      const title = document.getElementById('title');
+      const message = document.getElementById('message');
+      const fail = (text) => {
+        title.textContent = 'Не удалось открыть UTool';
+        message.textContent = text;
+        message.className = 'error';
+      };
+
+      try {
+        const incoming = new URLSearchParams(location.search);
+        if (!incoming.size && location.hash.length > 1) {
+          new URLSearchParams(location.hash.slice(1)).forEach((value, key) => incoming.set(key, value));
+        }
+
+        const state = incoming.get('state');
+        if (!state) throw new Error('В ответе Google отсутствует state.');
+
+        const encoded = state.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+        const padded = encoded + '='.repeat((4 - encoded.length % 4) % 4);
+        const bytes = Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+        const payload = JSON.parse(new TextDecoder().decode(bytes));
+        const callback = new URL(payload.callback);
+        const port = Number(callback.port);
+
+        if (callback.protocol !== 'http:' ||
+            callback.hostname !== '127.0.0.1' ||
+            callback.pathname !== '/oauth/callback' ||
+            !Number.isInteger(port) || port < 1024 || port > 65535) {
+          throw new Error('UTool передал недопустимый локальный callback.');
+        }
+
+        ['code', 'error', 'error_description', 'picked_file_ids', 'scope', 'state'].forEach((key) => {
+          const value = incoming.get(key);
+          if (value) callback.searchParams.set(key, value);
+        });
+        location.replace(callback.toString());
+      } catch (error) {
+        fail(error instanceof Error ? error.message : 'Некорректный ответ авторизации.');
+      }
+    })();
+  </script>
+</body>
+</html>
